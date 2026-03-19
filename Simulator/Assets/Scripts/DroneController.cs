@@ -19,88 +19,85 @@ public class DroneController : MonoBehaviour
     private float targetPitch;
     private float targetRoll;
 
-    private GameInput gameInput;
+    // Use the abstract input provider (assign DroneInput component in inspector or allow GetComponent fallback)
+    [SerializeField] private DroneInputBase inputSource;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         rb.interpolation = RigidbodyInterpolation.Interpolate;
 
-        gameInput = new GameInput();
-        gameInput.Enable();
+        Debug.Log($"DroneController Awake: rb.isKinematic={rb.isKinematic} mass={rb.mass} drag={rb.linearDamping} constraints={rb.constraints}");
 
-        // Register input callbacks
-        gameInput.Player.Move.performed += ctx => moveInput = ctx.ReadValue<Vector2>();
-        gameInput.Player.Move.canceled += ctx => moveInput = Vector2.zero;
-
-        gameInput.Player.Look.performed += ctx => lookInput = ctx.ReadValue<Vector2>();
-        gameInput.Player.Look.canceled += ctx => lookInput = Vector2.zero;
-
-        gameInput.Player.Dash.performed += ctx => isBoosting = ctx.ReadValue<float>() > 0.5f;
-        gameInput.Player.Dash.canceled += ctx => isBoosting = false;
+        if (inputSource == null)
+            inputSource = GetComponent<DroneInputBase>();
 
         // Optional: lock cursor
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
 
-    void OnDestroy()
-    {
-        // Unsubscribe
-        gameInput.Player.Move.performed -= ctx => moveInput = ctx.ReadValue<Vector2>();
-        gameInput.Player.Move.canceled -= ctx => moveInput = Vector2.zero;
-
-        gameInput.Player.Look.performed -= ctx => lookInput = ctx.ReadValue<Vector2>();
-        gameInput.Player.Look.canceled -= ctx => lookInput = Vector2.zero;
-
-        gameInput.Player.Dash.performed -= ctx => isBoosting = ctx.ReadValue<float>() > 0.5f;
-        gameInput.Player.Dash.canceled -= ctx => isBoosting = false;
-
-        gameInput.Disable();
-    }
-
     void Update()
     {
-        // Handle vertical movement
-        float up = gameInput.Player.Up.ReadValue<float>();
-        float down = gameInput.Player.Down.ReadValue<float>();
-        verticalInput = (up > 0.5f) ? 1f : (down > 0.5f) ? -1f : 0f;
+        if (inputSource == null)
+        {
+            Debug.LogWarning("DroneController: no inputSource assigned or found on GameObject.");
+            moveInput = Vector2.zero;
+            lookInput = Vector2.zero;
+            verticalInput = 0f;
+            isBoosting = false;
+        }
+        else
+        {
+            // Read current values each frame
+            moveInput = inputSource.Move();
+            lookInput = inputSource.Look();
 
-        // Handle rotation input (yaw and pitch)
+            float up = inputSource.Up();
+            float down = inputSource.Down();
+            verticalInput = (up > 0.5f) ? 1f : (down > 0.5f) ? -1f : 0f;
+
+            isBoosting = inputSource.DashInput() > 0.5f;
+        }
+
+        // Rotation input
         float yawInput = lookInput.x;
-        float pitchInput = -lookInput.y; // invert if needed
+        float pitchInput = -lookInput.y;
 
         targetYaw += yawInput * rotationSpeed * Time.deltaTime;
         targetPitch += pitchInput * rotationSpeed * Time.deltaTime;
 
-        // Clamp pitch to avoid flipping
         targetPitch = Mathf.Clamp(targetPitch, -80f, 80f);
 
-        // Calculate roll for banking based on lateral movement
         targetRoll = -moveInput.x * bankAngleLimit;
+
+        // Lightweight logging only when input exists
+        if (moveInput.sqrMagnitude > 0.0001f || isBoosting)
+            Debug.Log($"DroneController Update: moveInput={moveInput} dash={isBoosting} vertical={verticalInput}");
     }
 
     void FixedUpdate()
     {
         float currentSpeed = baseSpeed * (isBoosting ? boostMultiplier : 1f);
 
-        // Forward/Backward and strafing movement
         Vector3 desiredDirection = transform.forward * moveInput.y + transform.right * moveInput.x;
         if (desiredDirection.magnitude > 1f)
             desiredDirection.Normalize();
 
         Vector3 desiredVelocity = desiredDirection * currentSpeed;
-        Vector3 velocityError = desiredVelocity - rb.linearVelocity;
-        rb.AddForce(velocityError / 0.2f, ForceMode.Acceleration); // inertia factor
 
-        // Vertical movement (ascend/descend)
+        // Use rb.velocity and apply force to reach desiredVelocity
+        Vector3 velocityError = desiredVelocity - rb.linearVelocity;
+        rb.AddForce(velocityError / 0.2f, ForceMode.Acceleration);
+
+        // Vertical
         rb.AddForce(Vector3.up * verticalInput * verticalSpeed, ForceMode.Acceleration);
 
-        // Rotation (yaw, pitch, roll)
+        // Rotation via physics
         Quaternion targetRotation = Quaternion.Euler(targetPitch, targetYaw, targetRoll);
-        rb.MoveRotation(Quaternion.Slerp(rb.rotation, targetRotation, 0.1f));
+        rb.MoveRotation(Quaternion.Slerp(rb.rotation, targetRotation, 10f * Time.fixedDeltaTime));
 
-        // Optional: Add banking tilt to the drone's local rotation for visual effect
-        transform.localEulerAngles = new Vector3(targetPitch, targetYaw, targetRoll);
+        if (desiredVelocity.sqrMagnitude > 0.0001f)
+            Debug.Log($"DroneController FixedUpdate: desired={desiredVelocity} rb.velocity={rb.linearVelocity}");
     }
 }
