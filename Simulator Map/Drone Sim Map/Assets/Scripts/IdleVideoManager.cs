@@ -6,7 +6,7 @@ using UnityEngine.Video;
 public class IdleVideoManager : MonoBehaviour
 {
     public VideoPlayer videoPlayer;
-    public GameObject videoUI; // Drag your Raw Image object here
+    public GameObject videoUI;
     public float idleThreshold = 10f;
     private float idleTimer;
 
@@ -29,7 +29,7 @@ public class IdleVideoManager : MonoBehaviour
         if (videoPlayer.isPlaying)
         {
             videoPlayer.Stop();
-            videoUI.SetActive(false); // <--- HIDES the video UI when you move
+            videoUI.SetActive(false); // Hides the video UI when you move
         }
     }
 
@@ -39,7 +39,7 @@ public class IdleVideoManager : MonoBehaviour
 
         if (idleTimer >= idleThreshold && !videoPlayer.isPlaying)
         {
-            videoUI.SetActive(true); // <--- SHOWS the video UI when idle
+            videoUI.SetActive(true); // Shows the video UI when idle
             videoPlayer.Play();
         }
     }
